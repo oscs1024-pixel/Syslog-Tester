@@ -61,3 +61,5 @@ go run .
 ## 开发依据
 
 MyGo 官方示例：[`examples/vibrancy`](https://github.com/egoist/mygo/tree/v0.3.7/examples/vibrancy)、[`examples/gallery`](https://github.com/egoist/mygo/tree/v0.3.7/examples/gallery)、[`plugins/glass`](https://github.com/egoist/mygo/tree/v0.3.7/plugins/glass)。
+
+接收目标管理页面支持新增、搜索、复制、编辑和删除；连接总超时与写入超时均可按毫秒设置（1–60000 ms），目标选择不影响正在执行的发送任务。

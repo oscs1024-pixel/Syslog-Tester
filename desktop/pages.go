@@ -237,10 +237,15 @@ func (a *application) targetsPage(c *ui.Context) {
 	head(c, "接收目标", "统一配置 Syslog 服务器；发送页面只需要选择目标。")
 	data := a.db.Snapshot()
 	panel(c, fmt.Sprintf("已保存的接收目标 · %d", len(data.Targets)), func() {
+		ui.SearchField(c, &a.targetFilter).Placeholder("搜索名称、IP 或协议").Label("查找接收目标")
 		if len(data.Targets) == 0 {
 			ui.Text(c, "暂无目标，请在下方添加。").TextColor(c.Theme().TextMuted)
 		}
 		for _, target := range data.Targets {
+			term := strings.ToLower(strings.TrimSpace(a.targetFilter))
+			if term != "" && !strings.Contains(strings.ToLower(target.Name+" "+target.Host+" "+string(target.Protocol)), term) {
+				continue
+			}
 			target := target
 			ui.Row(c).Padding(12, 8).Gap(12).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, serverIcon).Size(18, 18).TextColor(c.Theme().Accent)
@@ -257,6 +262,12 @@ func (a *application) targetsPage(c *ui.Context) {
 				}
 				if ui.Button(c, "编辑").Clicked() {
 					a.editTarget(target)
+				}
+				if ui.Button(c, "复制").Clicked() {
+					a.editTarget(target)
+					a.editingID = ""
+					a.form.Name = target.Name + " 副本"
+					a.form.Default = false
 				}
 				if ui.Button(c, "删除").Clicked() {
 					if e := a.db.Delete(target.ID); e != nil {
@@ -284,6 +295,8 @@ func (a *application) targetsPage(c *ui.Context) {
 				ui.Field(c, "TCP 分帧", func() { ui.Select(c, &a.form.Framing, []string{"octet-counting", "lf", "crlf"}) })
 			}
 			ui.Field(c, "本地源 IP（可选）", func() { ui.TextInput(c, &a.form.LocalIP).Placeholder("由系统自动选择") })
+			ui.Field(c, "连接总超时 (ms)", func() { ui.TextInput(c, &a.form.ConnectTimeoutMS).Placeholder("5000") })
+			ui.Field(c, "写入超时 (ms)", func() { ui.TextInput(c, &a.form.WriteTimeoutMS).Placeholder("5000") })
 			ui.Checkbox(c, &a.form.Default, "设为默认目标")
 		})
 		ui.Row(c).Gap(10).Children(func() {
@@ -293,7 +306,7 @@ func (a *application) targetsPage(c *ui.Context) {
 			if a.editingID != "" {
 				if ui.Button(c, "取消编辑").Clicked() {
 					a.editingID = ""
-					a.form = targetForm{Port: "514", Protocol: "udp", Framing: "octet-counting"}
+					a.form = blankTargetForm()
 				}
 			}
 		})

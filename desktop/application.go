@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,18 +41,29 @@ type application struct {
 	status        string
 	form          targetForm
 	editingID     string
+	targetFilter  string
 	details       string
 }
 type targetForm struct {
-	Name, Host, Port, Protocol, Framing, LocalIP string
-	Default                                      bool
+	Name, Host, Port, Protocol, Framing, LocalIP, ConnectTimeoutMS, WriteTimeoutMS string
+	Default                                                                        bool
 }
 
+func blankTargetForm() targetForm {
+	return targetForm{Port: "514", Protocol: "udp", Framing: "octet-counting", ConnectTimeoutMS: "5000", WriteTimeoutMS: "5000"}
+}
+func parseTimeoutMS(s string) (time.Duration, error) {
+	ms, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || ms < 1 || ms > 60000 {
+		return 0, fmt.Errorf("超时需为 1-60000 ms")
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
 func newApplication(db *store.Store) *application {
 	data := db.Snapshot()
 	return &application{db: db, runner: sender.New(), page: "single", selectedID: data.SelectedID,
 		message: "<134>Oct 10 12:00:00 fw01 firewall: action=deny src=192.0.2.10 dst=198.51.100.20",
-		format:  0, facility: 16, severity: 6, loops: 1, txtMode: 0, form: targetForm{Port: "514", Protocol: "udp", Framing: "octet-counting"}}
+		format:  0, facility: 16, severity: 6, loops: 1, txtMode: 0, form: blankTargetForm()}
 }
 
 func (a *application) target() (domain.Target, error) {
@@ -121,6 +133,10 @@ func (a *application) sendSingle() {
 	if a.format == 0 {
 		payload = []byte(a.message)
 	} else {
+		if a.facility < 0 || a.facility > 23 || a.severity < 0 || a.severity > 7 || math.Trunc(a.facility) != a.facility || math.Trunc(a.severity) != a.severity {
+			a.status = "Facility 或 Severity 超出范围"
+			return
+		}
 		format := syslog.RFC3164
 		if a.format == 2 {
 			format = syslog.RFC5424
@@ -207,7 +223,17 @@ func (a *application) saveTarget() {
 		a.status = "端口范围必须为 1-65535"
 		return
 	}
-	t := domain.Target{ID: a.editingID, Name: a.form.Name, Host: a.form.Host, Port: uint16(port), Protocol: domain.Protocol(a.form.Protocol), Framing: domain.Framing(a.form.Framing), LocalIP: strings.TrimSpace(a.form.LocalIP), Default: a.form.Default}
+	connect, e := parseTimeoutMS(a.form.ConnectTimeoutMS)
+	if e != nil {
+		a.status = "连接" + e.Error()
+		return
+	}
+	write, e := parseTimeoutMS(a.form.WriteTimeoutMS)
+	if e != nil {
+		a.status = "写入" + e.Error()
+		return
+	}
+	t := domain.Target{ID: a.editingID, Name: a.form.Name, Host: a.form.Host, Port: uint16(port), Protocol: domain.Protocol(a.form.Protocol), Framing: domain.Framing(a.form.Framing), LocalIP: strings.TrimSpace(a.form.LocalIP), ConnectTimeout: connect, WriteTimeout: write, Default: a.form.Default}
 	saved, err := a.db.Upsert(t)
 	if err != nil {
 		a.status = err.Error()
@@ -217,12 +243,13 @@ func (a *application) saveTarget() {
 		a.selectedID = saved.ID
 	}
 	a.editingID = ""
-	a.form = targetForm{Port: "514", Protocol: "udp", Framing: "octet-counting"}
+	a.form = blankTargetForm()
 	a.status = "目标已保存"
 }
 func (a *application) editTarget(t domain.Target) {
 	a.editingID = t.ID
-	a.form = targetForm{Name: t.Name, Host: t.Host, Port: strconv.Itoa(int(t.Port)), Protocol: string(t.Protocol), Framing: string(t.Framing), LocalIP: t.LocalIP, Default: t.Default}
+	a.form = targetForm{Name: t.Name, Host: t.Host, Port: strconv.Itoa(int(t.Port)), Protocol: string(t.Protocol), Framing: string(t.Framing), LocalIP: t.LocalIP,
+		ConnectTimeoutMS: strconv.FormatInt(t.ConnectTimeout.Milliseconds(), 10), WriteTimeoutMS: strconv.FormatInt(t.WriteTimeout.Milliseconds(), 10), Default: t.Default}
 	if a.form.Framing == "" {
 		a.form.Framing = "octet-counting"
 	}

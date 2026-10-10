@@ -39,6 +39,9 @@ jobs:
       - name: Compile desktop app
         working-directory: desktop
         run: go build -o SyslogTester .
+      - name: Desktop unit tests
+        working-directory: desktop
+        run: go test ./...
       - name: Validate desktop sources
         working-directory: desktop
         run: go vet ./...
