@@ -1,0 +1,6 @@
+.DS_Store
+*.test
+*.exe
+/desktop/SyslogTester
+/desktop/SyslogTester.exe
+/build/
