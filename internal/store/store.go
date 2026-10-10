@@ -156,11 +156,20 @@ func (s *Store) Select(targetID string) error {
 	})
 }
 func (s *Store) Append(stats sender.Stats) error {
-	key, e := id()
-	if e != nil {
-		return e
+	key := stats.JobID
+	if key == "" {
+		var err error
+		key, err = id()
+		if err != nil {
+			return err
+		}
 	}
 	return s.mutate(func(d *Data) error {
+		for _, old := range d.History {
+			if old.ID == key {
+				return nil
+			}
+		}
 		d.History = append([]Record{{ID: key, Stats: stats}}, d.History...)
 		if len(d.History) > maxHistory {
 			d.History = d.History[:maxHistory]

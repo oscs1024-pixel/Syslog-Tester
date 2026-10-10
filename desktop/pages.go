@@ -66,7 +66,13 @@ func (a *application) targetPicker(c *ui.Context) {
 	ids := make(map[string]string, len(targets))
 	selected := ""
 	for _, t := range targets {
-		label := fmt.Sprintf("%s · %s:%d · %s", t.Name, t.Host, t.Port, strings.ToUpper(string(t.Protocol)))
+		label := fmt.Sprintf("%s · %s · %s", t.Name, t.Address(), strings.ToUpper(string(t.Protocol)))
+		if t.Protocol == "tcp" {
+			label += " · " + string(t.Framing)
+		}
+		if len(t.ID) >= 6 {
+			label += " · " + t.ID[:6]
+		}
 		options = append(options, label)
 		ids[label] = t.ID
 		if t.ID == a.selectedID {

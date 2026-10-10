@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
@@ -33,11 +34,50 @@ func Dial(ctx context.Context, target domain.Target) (*Client, error) {
 			d.LocalAddr = &net.TCPAddr{IP: ip}
 		}
 	}
-	conn, err := d.DialContext(ctx, string(t.Protocol), t.Address())
+	// 连接建立使用总超时预算及有限退避；不自动重试消息写入，避免重复告警。
+	budgetCtx, cancel := context.WithTimeout(ctx, t.ConnectTimeout)
+	defer cancel()
+	attempts := 3
+	if t.Protocol == domain.UDP {
+		attempts = 1
+	} // UDP connect 并不探测远端是否可达。
+	conn, err := dialWithRetry(budgetCtx, attempts, func(callCtx context.Context) (net.Conn, error) {
+		return d.DialContext(callCtx, string(t.Protocol), t.Address())
+	})
 	if err != nil {
 		return nil, fmt.Errorf("连接 %s: %w", t.Address(), err)
 	}
 	return &Client{target: t, conn: conn}, nil
+}
+
+// dialWithRetry 至多尝试指定次数；退避含抖动并支持立即取消。
+func dialWithRetry(ctx context.Context, attempts int, open func(context.Context) (net.Conn, error)) (net.Conn, error) {
+	if attempts < 1 {
+		return nil, errors.New("重试预算必须大于零")
+	}
+	var last error
+	for i := 0; i < attempts; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := open(ctx)
+		if err == nil {
+			return conn, nil
+		}
+		last = err
+		if i+1 == attempts {
+			break
+		}
+		wait := time.Duration(75*(1<<i)+rand.IntN(50)) * time.Millisecond
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, fmt.Errorf("%d 次连接尝试失败: %w", attempts, last)
 }
 
 func (c *Client) Close() error {
@@ -54,7 +94,7 @@ func Frame(f domain.Framing, payload []byte) ([]byte, error) {
 	}
 	switch f {
 	case domain.OctetCounting:
-		return append(append([]byte(strconv.Itoa(len(payload))+" "), payload...), []byte{}...), nil
+		return append([]byte(strconv.Itoa(len(payload))+" "), payload...), nil
 	case domain.Newline, domain.CRLF:
 		if bytes.ContainsAny(payload, "\r\n") {
 			return nil, errors.New("按行 TCP 分帧不能发送包含换行的消息，请选择 octet-counting")

@@ -101,3 +101,30 @@ func TestCancelledDial(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestDialRetryBudget(t *testing.T) {
+	attempts := 0
+	conn, err := dialWithRetry(context.Background(), 3, func(context.Context) (net.Conn, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		c, peer := net.Pipe()
+		t.Cleanup(func() { _ = peer.Close() })
+		return c, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if attempts != 3 {
+		t.Fatalf("attempts=%d", attempts)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts = 0
+	_, err = dialWithRetry(ctx, 3, func(context.Context) (net.Conn, error) { attempts++; return nil, io.ErrUnexpectedEOF })
+	if err != context.Canceled || attempts != 0 {
+		t.Fatalf("cancel %v attempts=%d", err, attempts)
+	}
+}

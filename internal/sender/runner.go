@@ -2,6 +2,8 @@ package sender
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,7 @@ const (
 )
 
 type Stats struct {
+	JobID       string        `json:"job_id"`
 	State       State         `json:"state"`
 	Target      domain.Target `json:"target"`
 	Started     time.Time     `json:"started"`
@@ -69,6 +72,10 @@ func (r *Runner) Start(parent context.Context, job Job, notify func(Stats)) (<-c
 	if job.Source == nil || job.Loops < 1 || job.Loops > 10000 || job.Interval < 0 || job.Interval > time.Hour {
 		return nil, errors.New("任务参数无效")
 	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return nil, fmt.Errorf("生成任务 ID: %w", err)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	r.mu.Lock()
 	if r.stats.State == Running || r.stats.State == Paused {
@@ -80,7 +87,7 @@ func (r *Runner) Start(parent context.Context, job Job, notify func(Stats)) (<-c
 	r.done = done
 	r.cancel = cancel
 	r.resume = nil
-	r.stats = Stats{State: Running, Target: t, Started: time.Now()}
+	r.stats = Stats{JobID: hex.EncodeToString(random[:]), State: Running, Target: t, Started: time.Now()}
 	snap := r.stats
 	r.mu.Unlock()
 	if notify != nil {

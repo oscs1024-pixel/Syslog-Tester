@@ -78,3 +78,18 @@ func TestSaveFailureKeepsMemory(t *testing.T) {
 		t.Fatal("committed on failure")
 	}
 }
+
+func TestAppendSameJobIsIdempotent(t *testing.T) {
+	s, _ := Open(filepath.Join(t.TempDir(), "db.json"))
+	stats := sender.Stats{JobID: "fixed-job-id", Sent: 5}
+	if err := s.Append(stats); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(stats); err != nil {
+		t.Fatal(err)
+	}
+	data := s.Snapshot()
+	if len(data.History) != 1 || data.History[0].ID != stats.JobID {
+		t.Fatalf("not idempotent: %+v", data.History)
+	}
+}
